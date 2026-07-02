@@ -7,10 +7,9 @@ export function daysUntil(date: string | Date | null | undefined): number | null
   return differenceInCalendarDays(startOfDay(target), startOfDay(new Date()));
 }
 
-/** 残り日数に応じた緊急度の色。 */
+/** 残り日数に応じた緊急度の色。期限切れも見落とし防止のため赤で示す。 */
 export function deadlineTone(days: number | null): "red" | "yellow" | "green" | "gray" {
   if (days === null) return "gray";
-  if (days < 0) return "gray";
   if (days <= 2) return "red";
   if (days <= 6) return "yellow";
   return "green";

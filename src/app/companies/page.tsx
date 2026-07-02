@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Plus,
@@ -12,12 +12,14 @@ import {
   Pencil,
   X,
   CalendarRange,
+  AlarmClock,
 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/client";
 import { useAuth } from "@/components/useAuth";
 import type { Company, CompanyStatus, Step } from "@/lib/types";
-import { STATUS_LABELS } from "@/lib/types";
+import { STATUS_LABELS, STATUS_BADGE_CLASSES } from "@/lib/types";
 import { FLOW_TEMPLATES } from "@/lib/flowTemplates";
+import { countdownLabel, daysUntil, deadlineTone, TONE_CLASSES } from "@/lib/dates";
 import {
   Button,
   Card,
@@ -31,13 +33,6 @@ import {
 import ConfigBanner from "@/components/ConfigBanner";
 import FlowProgress from "@/components/FlowProgress";
 
-const statusBadge: Record<string, string> = {
-  active: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
-  offer: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  rejected: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  done: "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
-};
-
 // ステータス絞り込み用（"all" は全件）
 const STATUS_FILTERS: { value: "all" | CompanyStatus; label: string }[] = [
   { value: "all", label: "すべて" },
@@ -47,15 +42,45 @@ const STATUS_FILTERS: { value: "all" | CompanyStatus; label: string }[] = [
   { value: "done", label: STATUS_LABELS.done },
 ];
 
-export default function CompaniesPage() {
+const SORTS = [
+  { value: "newest", label: "登録が新しい順" },
+  { value: "priority", label: "志望度が高い順" },
+  { value: "deadline", label: "締切が近い順" },
+] as const;
+type SortKey = (typeof SORTS)[number]["value"];
+
+function isCompanyStatus(v: string | null): v is CompanyStatus {
+  return v === "active" || v === "offer" || v === "rejected" || v === "done";
+}
+
+// 企業カードに出す「一番近い締切」（未完了ステップの締切＋未完了Webテスト締切の最小値）
+function nearestDeadline(c: Company, steps: Step[]): number | null {
+  const candidates: number[] = [];
+  for (const s of steps) {
+    if (s.deadline && s.status !== "done" && s.status !== "failed" && s.status !== "waiting") {
+      const d = daysUntil(s.deadline);
+      if (d !== null) candidates.push(d);
+    }
+  }
+  if (c.webtest_deadline && !c.webtest_done) {
+    const d = daysUntil(c.webtest_deadline);
+    if (d !== null) candidates.push(d);
+  }
+  return candidates.length === 0 ? null : Math.min(...candidates);
+}
+
+function CompaniesPageInner({ statusParam }: { statusParam: string | null }) {
   const { userId, ready, configured } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 検索・フィルタ
+  // 検索・フィルタ・並び替え
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | CompanyStatus>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | CompanyStatus>(
+    isCompanyStatus(statusParam) ? statusParam : "all"
+  );
+  const [sortKey, setSortKey] = useState<SortKey>("newest");
 
   // 追加 / 編集フォーム（editingId が null なら新規作成）
   const [open, setOpen] = useState(false);
@@ -109,10 +134,18 @@ export default function CompaniesPage() {
     return map;
   }, [steps]);
 
-  // 検索＋ステータスで絞り込み
+  // フィルタチップに件数を出す（絞り込む前に全体の内訳が見えるように）
+  const statusCounts = useMemo(() => {
+    const map = { all: companies.length } as Record<"all" | CompanyStatus, number>;
+    for (const f of STATUS_FILTERS) if (f.value !== "all") map[f.value] = 0;
+    for (const c of companies) map[c.status] += 1;
+    return map;
+  }, [companies]);
+
+  // 検索＋ステータスで絞り込み → 並び替え
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return companies.filter((c) => {
+    const list = companies.filter((c) => {
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (!q) return true;
       return (
@@ -120,7 +153,22 @@ export default function CompaniesPage() {
         (c.industry ?? "").toLowerCase().includes(q)
       );
     });
-  }, [companies, query, statusFilter]);
+    if (sortKey === "priority") {
+      list.sort((a, b) => b.priority - a.priority);
+    } else if (sortKey === "deadline") {
+      // 締切なしは最後へ
+      list.sort((a, b) => {
+        const da = nearestDeadline(a, stepsByCompany[a.id] ?? []);
+        const db = nearestDeadline(b, stepsByCompany[b.id] ?? []);
+        if (da === null && db === null) return 0;
+        if (da === null) return 1;
+        if (db === null) return -1;
+        return da - db;
+      });
+    }
+    // "newest" は取得時の created_at 降順のまま
+    return list;
+  }, [companies, query, statusFilter, sortKey, stepsByCompany]);
 
   function resetForm() {
     setEditingId(null);
@@ -263,7 +311,7 @@ export default function CompaniesPage() {
           )}
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
@@ -275,8 +323,23 @@ export default function CompaniesPage() {
               }`}
             >
               {f.label}
+              <span className={statusFilter === f.value ? "ml-1 opacity-80" : "ml-1 opacity-60"}>
+                {statusCounts[f.value]}
+              </span>
             </button>
           ))}
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            aria-label="並び替え"
+            className="ml-1 rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-slate-600 outline-none transition focus:border-brand-sky dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-300"
+          >
+            {SORTS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -301,7 +364,10 @@ export default function CompaniesPage() {
             <>
               <p className="mb-3 text-xs text-slate-400">{filtered.length} 件を表示中</p>
               <div className="grid gap-4 md:grid-cols-2">
-                {filtered.map((c) => (
+                {filtered.map((c) => {
+                  const nearest =
+                    c.status === "active" ? nearestDeadline(c, stepsByCompany[c.id] ?? []) : null;
+                  return (
                   <Card key={c.id} className="flex flex-col transition hover:scale-[1.01]">
                     <div className="flex items-start justify-between gap-2">
                       <Link href={`/companies/${c.id}`} className="min-w-0 flex-1">
@@ -335,13 +401,22 @@ export default function CompaniesPage() {
                       </div>
                     </div>
 
-                    <div className="mt-3 flex items-center justify-between">
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadge[c.status]}`}
-                      >
-                        {STATUS_LABELS[c.status]}
-                      </span>
-                      <div className="flex">
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[c.status]}`}
+                        >
+                          {STATUS_LABELS[c.status]}
+                        </span>
+                        {nearest !== null && (
+                          <span
+                            className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${TONE_CLASSES[deadlineTone(nearest)]}`}
+                          >
+                            <AlarmClock size={11} /> {countdownLabel(nearest)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex shrink-0">
                         {Array.from({ length: 5 }).map((_, i) => (
                           <Star
                             key={i}
@@ -367,7 +442,8 @@ export default function CompaniesPage() {
                       詳細・フロー編集 <ChevronRight size={14} />
                     </Link>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -527,4 +603,15 @@ export default function CompaniesPage() {
       </Modal>
     </div>
   );
+}
+
+// ダッシュボードのサマリーカード（/companies?status=active など）から絞り込み済みで開ける。
+// searchParams prop は Promise なので React の use() で読む
+export default function CompaniesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string | string[] }>;
+}) {
+  const { status } = use(searchParams);
+  return <CompaniesPageInner statusParam={typeof status === "string" ? status : null} />;
 }

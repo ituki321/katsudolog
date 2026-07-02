@@ -48,6 +48,14 @@ export const STATUS_LABELS: Record<CompanyStatus, string> = {
   done: "終了",
 };
 
+// 企業ステータスのバッジ色（一覧・ダッシュボード共通）
+export const STATUS_BADGE_CLASSES: Record<CompanyStatus, string> = {
+  active: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+  offer: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  rejected: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  done: "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+};
+
 export const STEP_STATUS_LABELS: Record<StepStatus, string> = {
   pending: "未着手",
   current: "進行中",
