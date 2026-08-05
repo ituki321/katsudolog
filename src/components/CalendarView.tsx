@@ -354,7 +354,7 @@ export default function CalendarView() {
 
       {!configured && <ConfigBanner />}
 
-      <div className="glass mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-xs">
+      <div className="surface mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-xs">
         <span className="flex items-center gap-1">
           <span className="inline-block h-3 w-3 rounded" style={{ background: "#1a2980" }} /> 面接・予定
         </span>
@@ -378,7 +378,7 @@ export default function CalendarView() {
         </span>
       </div>
 
-      <div className="glass p-2 md:p-4" style={{ height: "72vh" }}>
+      <div className="surface p-2 md:p-4" style={{ height: "72vh" }}>
         <DnDCalendar
           localizer={localizer}
           events={events}

@@ -155,7 +155,7 @@ export default function InternshipsPage() {
                         <div className="relative h-6 flex-1 rounded-full bg-slate-100 dark:bg-slate-700/50">
                           <div
                             className={`absolute top-0 h-6 rounded-full ${
-                              ongoing ? "brand-gradient pulse-current" : "bg-brand-navy/70"
+                              ongoing ? "bg-accent pulse-current" : "bg-accent/60"
                             }`}
                             style={{ left: `${left}%`, width: `${width}%` }}
                             title={`${format(s, "M/d")} - ${format(e, "M/d")}`}

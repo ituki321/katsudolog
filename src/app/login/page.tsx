@@ -44,10 +44,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center brand-gradient p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl dark:bg-slate-800">
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <div className="surface w-full max-w-md p-8">
         <div className="mb-6 text-center">
-          <h1 className="brand-text text-3xl font-bold">KatsudouLog</h1>
+          <h1 className="text-3xl font-bold leading-tight tracking-tight">KatsudouLog</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             就活の選考をまとめて管理
           </p>

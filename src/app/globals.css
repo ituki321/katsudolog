@@ -6,72 +6,102 @@
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-separator: var(--separator);
 
-  /* ブランドカラー（text-brand-sky / bg-brand-navy などで利用） */
-  --color-brand-sky: #38bdf8;
-  --color-brand-navy: #1a2980;
+  /* アクセントは1色だけ。既存コードの text-brand-sky / bg-brand-navy はこれに集約する。
+     色は「意味のあるとき」にだけ使う道具であって、面を塗る装飾ではない。 */
+  --color-accent: var(--accent);
+  --color-brand-sky: var(--accent);
+  --color-brand-navy: var(--accent-strong);
 }
 
 :root {
-  --background: #f5f7fb;
-  --foreground: #0f172a;
+  /* iOS の systemGroupedBackground 相当。コンテンツ面より一段暗い地を敷き、
+     その上に白いカードを浮かせることで階層を作る */
+  --background: #f2f2f7;
+  --foreground: #0b0b0c;
+  --surface: #ffffff;
+  --separator: rgba(60, 60, 67, 0.16);
 
-  /* ブランドグラデーションの停止色 */
-  --brand-from: #1a2980;
-  --brand-via: #2563eb;
-  --brand-to: #26d0ce;
+  --accent: #0a66d6;
+  --accent-strong: #084e9f;
+
+  /* 浮遊クローム専用の半透明。コンテンツ面には使わない */
+  --material: rgba(255, 255, 255, 0.72);
+  /* クロームの手前でコンテンツを溶かす色（背景と同色の不透明→透明） */
+  --edge-fade: rgba(242, 242, 247, 0.92);
 }
 
 .dark {
-  --background: #0b1120;
-  --foreground: #e2e8f0;
+  --background: #000000;
+  --foreground: #f2f2f7;
+  --surface: #1c1c1e;
+  --separator: rgba(84, 84, 88, 0.55);
+
+  --accent: #4aa3ff;
+  --accent-strong: #7cc0ff;
+
+  --material: rgba(28, 28, 30, 0.72);
+  --edge-fade: rgba(0, 0, 0, 0.92);
 }
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(900px 500px at 110% -10%, color-mix(in srgb, var(--brand-to) 14%, transparent), transparent),
-    radial-gradient(800px 500px at -10% 0%, color-mix(in srgb, var(--brand-from) 10%, transparent), transparent),
-    var(--background);
-  background-attachment: fixed;
+  /* 装飾用の radial-gradient は撤去。地は無地にして、情報だけが色を持つようにする */
+  background: var(--background);
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Hiragino Sans", "Noto Sans JP", Meiryo, sans-serif;
 }
 
-/* ===== ブランド ===== */
-.brand-gradient {
-  background-image: linear-gradient(
-    135deg,
-    var(--brand-from) 0%,
-    var(--brand-via) 55%,
-    var(--brand-to) 100%
-  );
+/* ===== セーフエリア =====
+   ホームインジケーターやノッチに要素が潜り込まないようにする。
+   固定配置のクロームは自分で下端の余白を確保する責任を持つ。 */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-.brand-text {
-  background-image: linear-gradient(135deg, var(--brand-from), var(--brand-via), var(--brand-to));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+/* 下部タブに隠れないための本文余白。タブの高さ＋インジケーターぶん。
+   タブは md 未満にしか出ないので、この余白も同じ範囲に限定する
+   （md:pb-8 などの Tailwind ユーティリティと張り合わないようにするため） */
+@media (max-width: 767.98px) {
+  .pb-tabbar {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
-/* ===== ガラスカード ===== */
-.glass {
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 10px 30px -16px rgba(15, 23, 42, 0.25);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+/* ===== スクロールエッジ =====
+   浮遊クロームとコンテンツの境目は 1px の罫線ではなく、ぼかしで処理する。
+   罫線は「ここで切れている」と読ませるが、実際にはコンテンツは下に続いている。 */
+.scroll-edge-top::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 1.25rem;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--edge-fade), transparent);
 }
-.dark .glass {
-  background: rgba(30, 41, 59, 0.55);
-  border-color: rgba(148, 163, 184, 0.14);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 10px 30px -16px rgba(0, 0, 0, 0.65);
+
+/* ===== コンテンツ面 =====
+   不透明。半透明を重ねると背後の情報が透けて可読性が落ちるうえ、
+   すべての面が浮いていると「何が浮いているのか」が伝わらなくなる。 */
+.surface {
+  border-radius: 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--separator);
+}
+
+/* ===== 浮遊クローム =====
+   半透明はここだけ。ナビ・ツールバー・シートの下をコンテンツが流れていくことを示す。 */
+.material {
+  background: var(--material);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 
 /* ===== アニメーション ===== */
@@ -109,6 +139,32 @@ body {
   }
 }
 
+/* ===== 透過・コントラストの設定に合わせる =====
+   半透明は「浮いている層」を伝えるための手段であって、読めなくなったら本末転倒。
+   透過を減らす設定なら曇りガラスをやめて塗り、コントラスト優先なら境界をはっきりさせる。 */
+@media (prefers-reduced-transparency: reduce) {
+  .material {
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .modal-scrim {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(0, 0, 0, 0.8);
+  }
+}
+
+@media (prefers-contrast: more) {
+  .surface,
+  .material {
+    background: var(--surface);
+    border-color: var(--foreground);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* ===== react-big-calendar モダンテーマ ===== */
 .rbc-calendar {
   font-family: inherit;
@@ -126,9 +182,9 @@ body {
   font-size: 1.05rem;
 }
 .rbc-toolbar button {
-  color: #334155;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
+  color: var(--foreground);
+  border: 1px solid var(--separator);
+  background: var(--surface);
   border-radius: 0.65rem;
   padding: 0.35rem 0.85rem;
   font-weight: 500;
@@ -136,17 +192,16 @@ body {
 }
 .rbc-toolbar button:hover,
 .rbc-toolbar button:focus {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #0f172a;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  border-color: var(--separator);
+  color: var(--foreground);
 }
 .rbc-toolbar button.rbc-active,
 .rbc-toolbar button.rbc-active:hover,
 .rbc-toolbar button.rbc-active:focus {
-  background-image: linear-gradient(135deg, var(--brand-from), var(--brand-via));
+  background: var(--accent);
   color: #ffffff;
   border-color: transparent;
-  box-shadow: 0 2px 8px -2px rgba(37, 99, 235, 0.55);
 }
 .rbc-btn-group {
   display: inline-flex;
@@ -161,8 +216,8 @@ body {
   padding: 0.55rem 0;
   font-weight: 600;
   font-size: 0.8rem;
-  color: #64748b;
-  border-bottom: 1px solid #eef2f7;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  border-bottom: 1px solid var(--separator);
 }
 .rbc-header + .rbc-header {
   border-left: none;
@@ -172,22 +227,22 @@ body {
 .rbc-month-view,
 .rbc-time-view,
 .rbc-agenda-view table.rbc-agenda-table {
-  border: 1px solid #eef2f7;
+  border: 1px solid var(--separator);
   border-radius: 1rem;
   overflow: hidden;
-  background: #ffffff;
+  background: var(--surface);
 }
 .rbc-month-row + .rbc-month-row {
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--separator);
 }
 .rbc-day-bg + .rbc-day-bg {
-  border-left: 1px solid #f1f5f9;
+  border-left: 1px solid var(--separator);
 }
 .rbc-off-range-bg {
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 .rbc-off-range {
-  color: #cbd5e1;
+  color: color-mix(in srgb, var(--foreground) 30%, transparent);
 }
 .rbc-date-cell {
   padding: 0.35rem 0.5rem;
@@ -196,7 +251,7 @@ body {
 
 /* 今日のセル＆日付 */
 .rbc-today {
-  background: color-mix(in srgb, var(--brand-sky) 12%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .rbc-now .rbc-button-link {
   display: inline-flex;
@@ -208,7 +263,7 @@ body {
   border-radius: 999px;
   font-weight: 700;
   color: #ffffff;
-  background-image: linear-gradient(135deg, var(--brand-from), var(--brand-via));
+  background: var(--accent);
 }
 
 /* イベント */
@@ -219,11 +274,11 @@ body {
   padding: 1px 5px;
 }
 .rbc-event:focus {
-  outline: 2px solid var(--brand-sky);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .rbc-show-more {
-  color: var(--brand-navy);
+  color: var(--accent);
   font-weight: 600;
   background: transparent;
 }
@@ -235,55 +290,33 @@ body {
 .rbc-timeslot-group,
 .rbc-agenda-view table.rbc-agenda-table td,
 .rbc-agenda-view table.rbc-agenda-table th {
-  border-color: #eef2f7;
+  border-color: var(--separator);
 }
 .rbc-current-time-indicator {
   background: #ef4444;
   height: 2px;
 }
 
-/* ---- ダークモード ---- */
-.dark .rbc-toolbar button {
-  background: #1e293b;
-  border-color: #334155;
-  color: #cbd5e1;
-}
+/* ---- ダークモード ----
+   面と罫線はトークン化済みなので、ここでは地の色の差だけを扱う */
 .dark .rbc-toolbar button:hover,
 .dark .rbc-toolbar button:focus {
-  background: #334155;
-  color: #ffffff;
-}
-.dark .rbc-month-view,
-.dark .rbc-time-view,
-.dark .rbc-agenda-view table.rbc-agenda-table {
-  background: #0f172a;
-  border-color: #1e293b;
-}
-.dark .rbc-header {
-  color: #94a3b8;
-  border-color: #1e293b;
-}
-.dark .rbc-month-row + .rbc-month-row,
-.dark .rbc-day-bg + .rbc-day-bg,
-.dark .rbc-time-content,
-.dark .rbc-timeslot-group,
-.dark .rbc-agenda-view table.rbc-agenda-table td,
-.dark .rbc-agenda-view table.rbc-agenda-table th {
-  border-color: #1e293b;
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+  color: var(--foreground);
 }
 .dark .rbc-off-range-bg {
   background: #0b1120;
 }
 .dark .rbc-off-range {
-  color: #475569;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
 }
 .dark .rbc-date-cell,
 .dark .rbc-button-link {
-  color: #cbd5e1;
+  color: var(--foreground);
 }
 .dark .rbc-today {
-  background: color-mix(in srgb, var(--brand-sky) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .dark .rbc-show-more {
-  color: var(--brand-sky);
+  color: var(--accent);
 }

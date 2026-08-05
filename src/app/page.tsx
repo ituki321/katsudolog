@@ -12,14 +12,17 @@ import {
   ChevronRight,
   Check,
   Hourglass,
+  Rocket,
 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/client";
 import { useAuth } from "@/components/useAuth";
-import type { Company, Step } from "@/lib/types";
+import type { Company, SelectionType, Step } from "@/lib/types";
+import { SELECTION_LABELS } from "@/lib/types";
 import {
   countdownLabel,
   daysUntil,
   deadlineTone,
+  mainStartLabel,
   TONE_CLASSES,
 } from "@/lib/dates";
 import { Card, EmptyState, PageHeader, Spinner } from "@/components/ui";
@@ -164,6 +167,15 @@ export default function DashboardPage() {
     return list.slice(0, 8);
   }, [steps, companies]);
 
+  // 選考フロー一覧を区分で束ねる。本選考を先に出す（動いている選考から目に入るように）。
+  const flowGroups = useMemo(() => {
+    const groups: { type: SelectionType; items: Company[] }[] = [
+      { type: "main", items: companies.filter((c) => c.selection_type === "main") },
+      { type: "intern", items: companies.filter((c) => c.selection_type !== "main") },
+    ];
+    return groups.filter((g) => g.items.length > 0);
+  }, [companies]);
+
   // 結果待ち（選考の結果を待っているステップ）。今日やることとは分けて表示する。
   const waitings = useMemo(() => {
     const list: { key: string; label: string; companyId: string }[] = [];
@@ -178,15 +190,10 @@ export default function DashboardPage() {
   if (!ready || (configured && loading)) return <Spinner />;
 
   const summary = [
-    { label: "選考中", value: activeCount, icon: Briefcase, color: "from-sky-500 to-blue-600" },
-    { label: "内定", value: offerCount, icon: Trophy, color: "from-emerald-500 to-teal-600" },
-    {
-      label: "通過率",
-      value: passRate === null ? "—" : `${passRate}%`,
-      icon: Percent,
-      color: "from-violet-500 to-purple-600",
-    },
-    { label: "今週の予定", value: thisWeekCount, icon: CalendarClock, color: "from-amber-500 to-orange-600" },
+    { label: "選考中", value: activeCount, icon: Briefcase },
+    { label: "内定", value: offerCount, icon: Trophy },
+    { label: "通過率", value: passRate === null ? "—" : `${passRate}%`, icon: Percent },
+    { label: "今週の予定", value: thisWeekCount, icon: CalendarClock },
   ];
 
   return (
@@ -197,15 +204,15 @@ export default function DashboardPage() {
 
       {/* サマリーカード */}
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {summary.map(({ label, value, icon: Icon, color }) => (
+        {summary.map(({ label, value, icon: Icon }) => (
           <Card key={label} className="relative overflow-hidden">
-            <div className={`absolute -right-4 -top-4 h-16 w-16 rounded-full bg-gradient-to-br ${color} opacity-20`} />
             <div className="flex items-center gap-3">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${color} text-white`}>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
                 <Icon size={20} />
               </div>
               <div>
-                <div className="text-2xl font-bold">{value}</div>
+                {/* 数字は等幅字形にして、更新のたびに桁がずれないようにする */}
+                <div className="text-2xl font-bold tabular-nums tracking-tight">{value}</div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
               </div>
             </div>
@@ -265,7 +272,7 @@ export default function DashboardPage() {
               <ListChecks size={18} className="text-brand-sky" /> 今日やること
             </div>
             {todos.length === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-400">差し迫ったタスクはありません 🎉</p>
+              <p className="py-6 text-center text-sm text-slate-400">差し迫ったタスクはありません</p>
             ) : (
               <ul className="space-y-2">
                 {todos.map((t) => (
@@ -307,21 +314,49 @@ export default function DashboardPage() {
             )}
           </Card>
 
-          {/* 各企業のフロー進捗 */}
+          {/* 各企業のフロー進捗（区分ごとにまとめる） */}
           <Card className="lg:col-span-3">
             <div className="mb-4 font-bold">各社の選考フロー</div>
-            <div className="space-y-5">
-              {companies.map((c) => (
-                <div key={c.id}>
-                  <Link
-                    href={`/companies/${c.id}`}
-                    className="mb-2 flex items-center justify-between text-sm font-medium hover:text-brand-sky"
-                  >
-                    <span className="truncate">{c.name}</span>
-                    <ChevronRight size={15} className="shrink-0" />
-                  </Link>
-                  <FlowProgress steps={stepsByCompany[c.id] ?? []} />
-                </div>
+            <div className="space-y-7">
+              {flowGroups.map((g) => (
+                <section key={g.type}>
+                  <div className="mb-3 flex items-center gap-2">
+                    {g.type === "main" ? (
+                      <Rocket size={15} className="shrink-0 text-brand-sky" />
+                    ) : (
+                      <Briefcase size={15} className="shrink-0 text-slate-400" />
+                    )}
+                    <h3 className="text-sm font-semibold tracking-tight">
+                      {SELECTION_LABELS[g.type]}
+                    </h3>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                      {g.items.length}
+                    </span>
+                    <div className="h-px flex-1 bg-slate-200/70 dark:bg-slate-700/60" />
+                  </div>
+
+                  <div className="space-y-5">
+                    {g.items.map((c) => (
+                      <div key={c.id}>
+                        <Link
+                          href={`/companies/${c.id}`}
+                          className="mb-2 flex items-center justify-between gap-2 text-sm font-medium hover:text-brand-sky"
+                        >
+                          <span className="truncate">{c.name}</span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            {g.type === "main" && mainStartLabel(c.main_start_date) && (
+                              <span className="rounded-full bg-brand-sky/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-brand-navy dark:bg-brand-sky/15 dark:text-brand-sky">
+                                {mainStartLabel(c.main_start_date)}
+                              </span>
+                            )}
+                            <ChevronRight size={15} />
+                          </span>
+                        </Link>
+                        <FlowProgress steps={stepsByCompany[c.id] ?? []} />
+                      </div>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </Card>

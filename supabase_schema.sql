@@ -12,6 +12,9 @@ create table companies (
   webtest_done boolean default false, -- Webテスト完了フラグ
   memo text,              -- 自由メモ
   status text default 'active', -- active / offer / rejected / done
+  -- ★選考区分：intern=インターン選考 / main=本選考
+  selection_type text not null default 'intern',
+  main_start_date date,   -- 本選考の開始日（エントリー受付開始）
   created_at timestamptz default now()
 );
 
@@ -52,3 +55,8 @@ create policy "own internships" on internships for all using (auth.uid() = user_
 
 -- ▼既存DB向けマイグレーション（一度だけ実行）：インターンを企業に紐づける
 -- alter table internships add column if not exists company_id uuid references companies on delete cascade;
+
+-- ▼既存DB向けマイグレーション（一度だけ実行）：本選考の登録に対応
+-- 既存の企業はすべて intern 扱いになる。本選考の企業は画面から区分を切り替える。
+-- alter table companies add column if not exists selection_type text not null default 'intern';
+-- alter table companies add column if not exists main_start_date date;

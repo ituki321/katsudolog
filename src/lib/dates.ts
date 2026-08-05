@@ -23,6 +23,18 @@ export const TONE_CLASSES: Record<string, string> = {
   gray: "bg-slate-100 text-slate-600 dark:bg-slate-700/50 dark:text-slate-300",
 };
 
+/**
+ * 本選考の開始日を短いバッジ文言にする。
+ * 未来=「あとN日」/ 当日=「今日から」/ 過去=「開始済み」。日付未設定なら null。
+ */
+export function mainStartLabel(date: string | null | undefined): string | null {
+  const d = daysUntil(date);
+  if (d === null) return null;
+  if (d > 0) return `あと${d}日`;
+  if (d === 0) return "今日から";
+  return "開始済み";
+}
+
 export function countdownLabel(days: number | null): string {
   if (days === null) return "—";
   if (days < 0) return `${Math.abs(days)}日経過`;
