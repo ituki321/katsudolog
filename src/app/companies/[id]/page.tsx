@@ -26,6 +26,7 @@ import {
   TRACK_START_LABELS,
 } from "@/lib/types";
 import { FLOW_TEMPLATES } from "@/lib/flowTemplates";
+import CompanyLogo from "@/components/CompanyLogo";
 import { normalizeUrl, openUrl } from "@/lib/url";
 import { haptic } from "@/lib/haptics";
 import { countdownLabel, daysUntil, deadlineTone, TONE_CLASSES } from "@/lib/dates";
@@ -120,6 +121,7 @@ export default function CompanyDetailPage() {
         industry: company.industry,
         priority: company.priority,
         status: company.status,
+        website: company.website,
         mypage_url: company.mypage_url,
         webtest_url: company.webtest_url,
         webtest_deadline: company.webtest_deadline || null,
@@ -398,6 +400,25 @@ export default function CompanyDetailPage() {
                 </select>
               </Field>
             </div>
+
+            {/* 企業サイトURL（ロゴの取得元） */}
+            <Field label="企業サイトURL">
+              <div className="flex items-center gap-2">
+                <CompanyLogo website={company.website} size={40} />
+                <input
+                  value={company.website ?? ""}
+                  onChange={(e) => patchCompany({ website: e.target.value || null })}
+                  className={inputClass}
+                  placeholder="example.co.jp"
+                  inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
+              </div>
+              <span className="mt-1 block text-[11px] text-slate-400">
+                ここからロゴを取得します
+              </span>
+            </Field>
 
             {/* マイページURL */}
             <Field label="マイページURL">

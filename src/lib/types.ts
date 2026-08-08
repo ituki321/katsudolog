@@ -13,6 +13,8 @@ export interface Company {
   name: string;
   industry: string | null;
   priority: number;
+  /** 企業サイトのURL。ロゴ取得のドメイン源。マイページURLは就活サイトを指すので使えない */
+  website: string | null;
   mypage_url: string | null;
   webtest_url: string | null;
   webtest_deadline: string | null;

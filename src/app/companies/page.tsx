@@ -7,7 +7,6 @@ import {
   Star,
   Trash2,
   ChevronRight,
-  Building2,
   Search,
   Pencil,
   X,
@@ -34,6 +33,7 @@ import {
 import ConfigBanner from "@/components/ConfigBanner";
 import FlowProgress from "@/components/FlowProgress";
 import SegmentedControl from "@/components/SegmentedControl";
+import CompanyLogo from "@/components/CompanyLogo";
 
 const statusBadge: Record<string, string> = {
   active: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
@@ -75,6 +75,7 @@ export default function CompaniesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [industry, setIndustry] = useState("");
+  const [website, setWebsite] = useState("");
   const [priority, setPriority] = useState(3);
   const [status, setStatus] = useState<CompanyStatus>("active");
   // 新規作成時に同時に作るトラック（複数可）。1社で夏・冬・本選考を並行管理するため。
@@ -176,6 +177,7 @@ export default function CompaniesPage() {
     setEditingId(null);
     setName("");
     setIndustry("");
+    setWebsite("");
     setPriority(3);
     setStatus("active");
     setNewTracks(["summer"]);
@@ -197,6 +199,7 @@ export default function CompaniesPage() {
     setEditingId(c.id);
     setName(c.name);
     setIndustry(c.industry ?? "");
+    setWebsite(c.website ?? "");
     setPriority(c.priority);
     setStatus(c.status);
     setOpen(true);
@@ -220,6 +223,7 @@ export default function CompaniesPage() {
         .update({
           name: name.trim(),
           industry: industry.trim() || null,
+          website: website.trim() || null,
           priority,
           status,
         })
@@ -232,6 +236,7 @@ export default function CompaniesPage() {
           user_id: userId,
           name: name.trim(),
           industry: industry.trim() || null,
+          website: website.trim() || null,
           priority,
         })
         .select()
@@ -395,9 +400,7 @@ export default function CompaniesPage() {
                     <div className="flex items-start justify-between gap-2">
                       <Link href={`/companies/${c.id}`} className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
-                            <Building2 size={18} />
-                          </div>
+                          <CompanyLogo website={c.website} size={36} />
                           <div className="min-w-0">
                             <div className="truncate font-bold">{c.name}</div>
                             <div className="truncate text-xs text-slate-500 dark:text-slate-400">
@@ -532,6 +535,25 @@ export default function CompaniesPage() {
               placeholder="株式会社サンプル"
             />
           </Field>
+          <Field label="企業サイトURL（任意）">
+            <div className="flex items-center gap-2">
+              {/* 入力した瞬間にロゴが出るので、取れたかどうかがその場で分かる */}
+              <CompanyLogo website={website} size={40} />
+              <input
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                className={inputClass}
+                placeholder="example.co.jp"
+                inputMode="url"
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+            </div>
+            <span className="mt-1 block text-[11px] text-slate-400">
+              企業の公式サイト。ここからロゴを取得します（マイページURLでは取得できません）
+            </span>
+          </Field>
+
           <Field label="業界">
             <input
               value={industry}

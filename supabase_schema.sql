@@ -6,6 +6,7 @@ create table companies (
   industry text,
   priority int default 3,
   -- ★企業ごとの登録情報
+  website text,           -- 企業サイトURL（ロゴ取得のドメイン源）
   mypage_url text,        -- マイページURL
   webtest_url text,       -- WebテストURL
   webtest_deadline date,  -- Webテスト締切
@@ -105,3 +106,7 @@ create policy "own internships" on internships for all using (auth.uid() = user_
 -- update steps s set track_id = t.id
 -- from tracks t
 -- where t.company_id = s.company_id and s.track_id is null;
+
+-- ▼既存DB向けマイグレーション（一度だけ実行）：企業ロゴの自動表示
+-- ロゴ配信は企業名ではなくドメインで引くため、企業サイトの URL を持つ。
+-- alter table companies add column if not exists website text;
