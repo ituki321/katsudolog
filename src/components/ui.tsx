@@ -119,6 +119,7 @@ export function Modal({
   // ドラッグはヘッダーでだけ受ける。本文はスクロールさせたいので、掴む場所と取り合わせない
   const dragControls = useDragControls();
   const panelRef = useRef<HTMLDivElement>(null);
+  const scrimRef = useRef<HTMLDivElement>(null);
 
   // 出る道と戻る道を同じ variants で書く。別々に書くと必ずどちらかがズレる
   const variants = reduceMotion
@@ -136,6 +137,29 @@ export function Modal({
   useEffect(() => {
     if (open) controls.start("visible");
   }, [open, controls]);
+
+  // キーボードが出ると visualViewport だけが縮み、レイアウトビューポートは変わらない。
+  // 何もしないと画面下端に固定したシートがキーボードの裏に回り込んで見えなくなるので、
+  // 実際に見えている領域に器の高さを合わせる。
+  useEffect(() => {
+    if (!open) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      const el = scrimRef.current;
+      if (!el) return;
+      el.style.height = `${vv.height}px`;
+      el.style.top = `${vv.offsetTop}px`;
+      el.style.bottom = "auto";
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+    };
+  }, [open]);
 
   // onClose は呼び出し側でレンダリングのたびに作り直されることが多い。
   // これを下の effect の依存に入れると、1文字入力するたびに effect が張り直され、
@@ -213,6 +237,7 @@ export function Modal({
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={scrimRef}
           className="modal-scrim fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -225,7 +250,7 @@ export function Modal({
             role="dialog"
             aria-modal="true"
             aria-label={title}
-            className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-2xl bg-surface shadow-2xl sm:rounded-2xl"
+            className="flex max-h-[92%] w-full max-w-lg flex-col rounded-t-2xl bg-surface shadow-2xl sm:rounded-2xl"
             variants={variants}
             initial="hidden"
             animate={controls}
@@ -260,7 +285,7 @@ export function Modal({
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">{children}</div>
+            <div className="pb-sheet min-h-0 flex-1 overflow-y-auto px-5">{children}</div>
           </motion.div>
         </motion.div>
       )}
