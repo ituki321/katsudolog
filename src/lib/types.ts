@@ -87,6 +87,17 @@ export const TRACK_LABELS: Record<TrackKind, string> = {
 /** 表示順。時系列（夏 → 冬 → 本選考）に並べる */
 export const TRACK_ORDER: TrackKind[] = ["summer", "winter", "main"];
 
+/**
+ * start_date が何の日付なのかは種別で呼び名が変わるので、画面ではこの文言を出す。
+ * どれも「その選考の受付・選考が始まる日」を指し、インターンの実施日程ではない
+ * （実施日程は internships 側で管理する）。
+ */
+export const TRACK_START_LABELS: Record<TrackKind, string> = {
+  summer: "エントリー開始日",
+  winter: "エントリー開始日",
+  main: "本選考の開始日",
+};
+
 export const STEP_STATUS_LABELS: Record<StepStatus, string> = {
   pending: "未着手",
   current: "進行中",

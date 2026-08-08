@@ -18,7 +18,14 @@ import {
 import { getSupabase } from "@/lib/supabase/client";
 import { useAuth } from "@/components/useAuth";
 import type { Company, CompanyStatus, Step, StepStatus, Track, TrackKind } from "@/lib/types";
-import { STATUS_LABELS, STEP_STATUS_LABELS, TRACK_LABELS, TRACK_ORDER } from "@/lib/types";
+import {
+  STATUS_LABELS,
+  STEP_STATUS_LABELS,
+  TRACK_LABELS,
+  TRACK_ORDER,
+  TRACK_START_LABELS,
+} from "@/lib/types";
+import { FLOW_TEMPLATES } from "@/lib/flowTemplates";
 import { normalizeUrl, openUrl } from "@/lib/url";
 import { haptic } from "@/lib/haptics";
 import { countdownLabel, daysUntil, deadlineTone, TONE_CLASSES } from "@/lib/dates";
@@ -39,6 +46,13 @@ const stepStatusColor: Record<StepStatus, string> = {
   waiting: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
   done: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   failed: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+};
+
+// トラック種別ごとの既定テンプレ。企業追加画面と同じ対応にする
+const DEFAULT_TEMPLATE: Record<TrackKind, string> = {
+  summer: "intern",
+  winter: "intern",
+  main: "shinsotsu",
 };
 
 function toDateInput(v: string | null): string {
@@ -155,18 +169,43 @@ export default function CompanyDetailPage() {
   async function addTrack(kind: TrackKind) {
     if (!userId) return;
     haptic("commit");
-    const { data } = await getSupabase()
+    const supabase = getSupabase();
+    const { data } = await supabase
       .from("tracks")
       .insert({ company_id: id, user_id: userId, kind })
       .select()
       .single();
-    if (data) {
-      setTracks((prev) =>
-        [...prev, data as Track].sort(
-          (a, b) => TRACK_ORDER.indexOf(a.kind) - TRACK_ORDER.indexOf(b.kind)
-        )
-      );
-    }
+    if (!data) return;
+    const track = data as Track;
+    setTracks((prev) =>
+      [...prev, track].sort(
+        (a, b) => TRACK_ORDER.indexOf(a.kind) - TRACK_ORDER.indexOf(b.kind)
+      )
+    );
+
+    // 空のトラックを渡されても何もできないので、種別に応じた既定フローを入れておく
+    await applyTemplate(track.id, kind);
+  }
+
+  /** 種別に応じた既定フローをそのトラックに流し込む。ステップが空のトラックの復旧にも使う */
+  async function applyTemplate(trackId: string, kind: TrackKind) {
+    if (!userId) return;
+    const tpl = FLOW_TEMPLATES.find((t) => t.id === DEFAULT_TEMPLATE[kind]);
+    if (!tpl || tpl.steps.length === 0) return;
+    const { data: created } = await getSupabase()
+      .from("steps")
+      .insert(
+        tpl.steps.map((name, i) => ({
+          company_id: id,
+          track_id: trackId,
+          user_id: userId,
+          name,
+          order_index: i,
+          status: i === 0 ? "current" : "pending",
+        }))
+      )
+      .select();
+    if (created) setSteps((prev) => [...prev, ...(created as Step[])]);
   }
 
   async function updateTrack(trackId: string, patch: Partial<Track>) {
@@ -470,7 +509,19 @@ export default function CompanyDetailPage() {
                       >
                         {TRACK_LABELS[track.kind]}
                       </span>
-                      <div className="w-32">
+                      <button
+                        type="button"
+                        onClick={() => removeTrack(track.id)}
+                        aria-label={`${TRACK_LABELS[track.kind]}を削除`}
+                        className="ml-auto rounded-lg p-2 text-slate-400 transition-transform duration-150 hover:text-red-500 active:scale-90"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+
+                    {/* 何の日付なのかは種別で呼び名が変わるので、ラベルを画面に出す */}
+                    <div className="mb-3 grid grid-cols-2 gap-3">
+                      <Field label="ステータス">
                         <Select
                           ariaLabel={`${TRACK_LABELS[track.kind]}のステータス`}
                           value={track.status}
@@ -482,24 +533,20 @@ export default function CompanyDetailPage() {
                             label: v,
                           }))}
                         />
-                      </div>
-                      <input
-                        type="date"
-                        aria-label={`${TRACK_LABELS[track.kind]}の開始日`}
-                        value={track.start_date ?? ""}
-                        onChange={(e) =>
-                          updateTrack(track.id, { start_date: e.target.value || null })
-                        }
-                        className={`${inputClass} w-40`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeTrack(track.id)}
-                        aria-label={`${TRACK_LABELS[track.kind]}を削除`}
-                        className="ml-auto rounded-lg p-2 text-slate-400 transition-transform duration-150 hover:text-red-500 active:scale-90"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      </Field>
+                      <Field label={TRACK_START_LABELS[track.kind]}>
+                        <input
+                          type="date"
+                          value={track.start_date ?? ""}
+                          onChange={(e) =>
+                            updateTrack(track.id, { start_date: e.target.value || null })
+                          }
+                          className={inputClass}
+                        />
+                        <span className="mt-1 block text-[11px] text-slate-400">
+                          選考が始まる日。インターンの実施日程ではありません
+                        </span>
+                      </Field>
                     </div>
 
           <div className="mb-4 flex gap-2">
@@ -516,9 +563,19 @@ export default function CompanyDetailPage() {
           </div>
 
           {list.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400">
-              ステップがありません。上から追加してください。
-            </p>
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <p className="text-sm text-slate-400">ステップがありません</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  haptic("commit");
+                  applyTemplate(track.id, track.kind);
+                }}
+              >
+                <Plus size={15} /> テンプレからフローを作成
+              </Button>
+            </div>
           ) : (
             <div className="space-y-3">
               {list.map((s, i) => {
