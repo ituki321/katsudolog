@@ -1,7 +1,11 @@
 export type CompanyStatus = "active" | "offer" | "rejected" | "done";
 export type StepStatus = "pending" | "current" | "waiting" | "done" | "failed";
-/** 選考の区分。intern=インターン選考 / main=本選考 */
+/** 選考の区分。intern=インターン選考 / main=本選考
+ *  @deprecated 1社が複数の選考を持てるようになったため TrackKind に移行。列は当面残す */
 export type SelectionType = "intern" | "main";
+
+/** 選考トラックの種類。1社がこれらを同時に持てる */
+export type TrackKind = "summer" | "winter" | "main";
 
 export interface Company {
   id: string;
@@ -21,9 +25,25 @@ export interface Company {
   created_at: string;
 }
 
+/**
+ * 選考トラック。「夏インターン」「冬インターン」「本選考」をそれぞれ1本として扱う。
+ * ステータスと開始日はトラックごとに持つ（夏は通過、本選考は選考中、が普通に起きるため）。
+ */
+export interface Track {
+  id: string;
+  company_id: string;
+  user_id: string;
+  kind: TrackKind;
+  status: CompanyStatus;
+  start_date: string | null;
+  created_at: string;
+}
+
 export interface Step {
   id: string;
   company_id: string;
+  /** 所属する選考トラック。移行前の古い行では null になりうる */
+  track_id: string | null;
   user_id: string;
   name: string;
   order_index: number;
@@ -57,6 +77,15 @@ export const SELECTION_LABELS: Record<SelectionType, string> = {
   intern: "インターン",
   main: "本選考",
 };
+
+export const TRACK_LABELS: Record<TrackKind, string> = {
+  summer: "夏インターン",
+  winter: "冬インターン",
+  main: "本選考",
+};
+
+/** 表示順。時系列（夏 → 冬 → 本選考）に並べる */
+export const TRACK_ORDER: TrackKind[] = ["summer", "winter", "main"];
 
 export const STEP_STATUS_LABELS: Record<StepStatus, string> = {
   pending: "未着手",

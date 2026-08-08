@@ -137,6 +137,15 @@ export function Modal({
     if (open) controls.start("visible");
   }, [open, controls]);
 
+  // onClose は呼び出し側でレンダリングのたびに作り直されることが多い。
+  // これを下の effect の依存に入れると、1文字入力するたびに effect が張り直され、
+  // クリーンアップの focus 復帰と再実行時の初期フォーカスで入力欄からフォーカスが奪われる。
+  // 依存に載せず、常に最新の関数を ref 経由で呼ぶ。
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   // 背面のスクロールを止める＋Escape で閉じる＋フォーカスを閉じ込め、閉じたら呼び出し元へ返す
   useEffect(() => {
     if (!open) return;
@@ -154,7 +163,7 @@ export function Modal({
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -176,7 +185,7 @@ export function Modal({
       document.body.style.overflow = bodyOverflow;
       previouslyFocused?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   function onDragEnd(_: unknown, info: PanInfo) {
     const height = panelRef.current?.offsetHeight ?? 1;

@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/client";
 import { useAuth } from "@/components/useAuth";
-import type { Company, SelectionType, Step } from "@/lib/types";
-import { SELECTION_LABELS } from "@/lib/types";
+import type { Company, Step, Track, TrackKind } from "@/lib/types";
+import { TRACK_LABELS, TRACK_ORDER } from "@/lib/types";
 import {
   countdownLabel,
   daysUntil,
@@ -44,17 +44,20 @@ export default function DashboardPage() {
   const { ready, configured } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!configured) return;
     const supabase = getSupabase();
-    const [c, s] = await Promise.all([
+    const [c, s, t] = await Promise.all([
       supabase.from("companies").select("*"),
       supabase.from("steps").select("*"),
+      supabase.from("tracks").select("*"),
     ]);
     setCompanies((c.data as Company[]) ?? []);
     setSteps((s.data as Step[]) ?? []);
+    setTracks((t.data as Track[]) ?? []);
     setLoading(false);
   }, [configured]);
 
@@ -64,9 +67,9 @@ export default function DashboardPage() {
     if (ready) load();
   }, [ready, load]);
 
-  const stepsByCompany = useMemo(() => {
+  const stepsByTrack = useMemo(() => {
     const map: Record<string, Step[]> = {};
-    for (const s of steps) (map[s.company_id] ??= []).push(s);
+    for (const s of steps) if (s.track_id) (map[s.track_id] ??= []).push(s);
     return map;
   }, [steps]);
 
@@ -167,14 +170,19 @@ export default function DashboardPage() {
     return list.slice(0, 8);
   }, [steps, companies]);
 
-  // 選考フロー一覧を区分で束ねる。本選考を先に出す（動いている選考から目に入るように）。
+  // 選考フローを種別で束ねる。本選考 → 冬 → 夏 の順で、今動いているものから目に入るようにする。
   const flowGroups = useMemo(() => {
-    const groups: { type: SelectionType; items: Company[] }[] = [
-      { type: "main", items: companies.filter((c) => c.selection_type === "main") },
-      { type: "intern", items: companies.filter((c) => c.selection_type !== "main") },
-    ];
-    return groups.filter((g) => g.items.length > 0);
-  }, [companies]);
+    const byId = new Map(companies.map((c) => [c.id, c]));
+    const kinds: TrackKind[] = [...TRACK_ORDER].reverse();
+    return kinds
+      .map((kind) => ({
+        kind,
+        items: tracks
+          .filter((t) => t.kind === kind && byId.has(t.company_id))
+          .map((t) => ({ track: t, company: byId.get(t.company_id)! })),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [companies, tracks]);
 
   // 結果待ち（選考の結果を待っているステップ）。今日やることとは分けて表示する。
   const waitings = useMemo(() => {
@@ -319,40 +327,40 @@ export default function DashboardPage() {
             <div className="mb-4 font-bold">各社の選考フロー</div>
             <div className="space-y-7">
               {flowGroups.map((g) => (
-                <section key={g.type}>
+                <section key={g.kind}>
                   <div className="mb-3 flex items-center gap-2">
-                    {g.type === "main" ? (
-                      <Rocket size={15} className="shrink-0 text-brand-sky" />
+                    {g.kind === "main" ? (
+                      <Rocket size={15} className="shrink-0 text-accent" />
                     ) : (
                       <Briefcase size={15} className="shrink-0 text-slate-400" />
                     )}
                     <h3 className="text-sm font-semibold tracking-tight">
-                      {SELECTION_LABELS[g.type]}
+                      {TRACK_LABELS[g.kind]}
                     </h3>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-500 dark:bg-slate-700 dark:text-slate-300">
                       {g.items.length}
                     </span>
-                    <div className="h-px flex-1 bg-slate-200/70 dark:bg-slate-700/60" />
+                    <div className="h-px flex-1 bg-separator" />
                   </div>
 
                   <div className="space-y-5">
-                    {g.items.map((c) => (
-                      <div key={c.id}>
+                    {g.items.map(({ track, company }) => (
+                      <div key={track.id}>
                         <Link
-                          href={`/companies/${c.id}`}
-                          className="mb-2 flex items-center justify-between gap-2 text-sm font-medium hover:text-brand-sky"
+                          href={`/companies/${company.id}`}
+                          className="mb-2 flex items-center justify-between gap-2 text-sm font-medium hover:text-accent"
                         >
-                          <span className="truncate">{c.name}</span>
+                          <span className="truncate">{company.name}</span>
                           <span className="flex shrink-0 items-center gap-1.5">
-                            {g.type === "main" && mainStartLabel(c.main_start_date) && (
-                              <span className="rounded-full bg-brand-sky/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-brand-navy dark:bg-brand-sky/15 dark:text-brand-sky">
-                                {mainStartLabel(c.main_start_date)}
+                            {mainStartLabel(track.start_date) && (
+                              <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-accent">
+                                {mainStartLabel(track.start_date)}
                               </span>
                             )}
                             <ChevronRight size={15} />
                           </span>
                         </Link>
-                        <FlowProgress steps={stepsByCompany[c.id] ?? []} />
+                        <FlowProgress steps={stepsByTrack[track.id] ?? []} />
                       </div>
                     ))}
                   </div>

@@ -17,15 +17,17 @@ import {
 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/client";
 import { useAuth } from "@/components/useAuth";
-import type { Company, CompanyStatus, Step, StepStatus } from "@/lib/types";
-import { STATUS_LABELS, STEP_STATUS_LABELS } from "@/lib/types";
+import type { Company, CompanyStatus, Step, StepStatus, Track, TrackKind } from "@/lib/types";
+import { STATUS_LABELS, STEP_STATUS_LABELS, TRACK_LABELS, TRACK_ORDER } from "@/lib/types";
 import { normalizeUrl, openUrl } from "@/lib/url";
+import { haptic } from "@/lib/haptics";
 import { countdownLabel, daysUntil, deadlineTone, TONE_CLASSES } from "@/lib/dates";
 import {
   Button,
   Card,
   Field,
   PageHeader,
+  Select,
   Spinner,
   inputClass,
 } from "@/components/ui";
@@ -61,19 +63,26 @@ export default function CompanyDetailPage() {
 
   const [company, setCompany] = useState<Company | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingInfo, setSavingInfo] = useState(false);
-  const [newStep, setNewStep] = useState("");
+  // ステップ追加欄はトラックごとに独立して持つ
+  const [newStep, setNewStep] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!configured) return;
     const supabase = getSupabase();
-    const [c, s] = await Promise.all([
+    const [c, s, t] = await Promise.all([
       supabase.from("companies").select("*").eq("id", id).single(),
       supabase.from("steps").select("*").eq("company_id", id).order("order_index"),
+      supabase.from("tracks").select("*").eq("company_id", id),
     ]);
     setCompany((c.data as Company) ?? null);
     setSteps((s.data as Step[]) ?? []);
+    const list = ((t.data as Track[]) ?? []).sort(
+      (a, b) => TRACK_ORDER.indexOf(a.kind) - TRACK_ORDER.indexOf(b.kind)
+    );
+    setTracks(list);
     setLoading(false);
   }, [configured, id]);
 
@@ -115,22 +124,63 @@ export default function CompanyDetailPage() {
   }
 
   // ---- ステップ操作 ----
-  async function addStep() {
-    if (!userId || !newStep.trim()) return;
-    const order = steps.length ? Math.max(...steps.map((s) => s.order_index)) + 1 : 0;
+  function stepsOf(trackId: string) {
+    return steps
+      .filter((s) => s.track_id === trackId)
+      .sort((a, b) => a.order_index - b.order_index);
+  }
+
+  async function addStep(trackId: string) {
+    const name = (newStep[trackId] ?? "").trim();
+    if (!userId || !name) return;
+    const mine = stepsOf(trackId);
+    const order = mine.length ? Math.max(...mine.map((s) => s.order_index)) + 1 : 0;
     const { data } = await getSupabase()
       .from("steps")
       .insert({
         company_id: id,
+        track_id: trackId,
         user_id: userId,
-        name: newStep.trim(),
+        name,
         order_index: order,
         status: "pending",
       })
       .select()
       .single();
     if (data) setSteps((prev) => [...prev, data as Step]);
-    setNewStep("");
+    setNewStep((prev) => ({ ...prev, [trackId]: "" }));
+  }
+
+  // ---- トラック操作 ----
+  async function addTrack(kind: TrackKind) {
+    if (!userId) return;
+    haptic("commit");
+    const { data } = await getSupabase()
+      .from("tracks")
+      .insert({ company_id: id, user_id: userId, kind })
+      .select()
+      .single();
+    if (data) {
+      setTracks((prev) =>
+        [...prev, data as Track].sort(
+          (a, b) => TRACK_ORDER.indexOf(a.kind) - TRACK_ORDER.indexOf(b.kind)
+        )
+      );
+    }
+  }
+
+  async function updateTrack(trackId: string, patch: Partial<Track>) {
+    setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, ...patch } : t)));
+    await getSupabase().from("tracks").update(patch).eq("id", trackId);
+  }
+
+  async function removeTrack(trackId: string) {
+    const t = tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    if (!confirm(`「${TRACK_LABELS[t.kind]}」とその選考ステップを削除しますか？`)) return;
+    setTracks((prev) => prev.filter((x) => x.id !== trackId));
+    setSteps((prev) => prev.filter((s) => s.track_id !== trackId));
+    await getSupabase().from("tracks").delete().eq("id", trackId);
   }
 
   async function updateStep(stepId: string, patch: Partial<Step>) {
@@ -157,7 +207,12 @@ export default function CompanyDetailPage() {
   }
 
   async function move(stepId: string, dir: -1 | 1) {
-    const ordered = [...steps].sort((a, b) => a.order_index - b.order_index);
+    // 並べ替えは同じトラック内で完結させる。企業全体で並べると別の選考のステップと入れ替わる
+    const target = steps.find((s) => s.id === stepId);
+    if (!target) return;
+    const ordered = steps
+      .filter((s) => s.track_id === target.track_id)
+      .sort((a, b) => a.order_index - b.order_index);
     const idx = ordered.findIndex((s) => s.id === stepId);
     const swap = idx + dir;
     if (swap < 0 || swap >= ordered.length) return;
@@ -198,7 +253,6 @@ export default function CompanyDetailPage() {
     );
   }
 
-  const ordered = [...steps].sort((a, b) => a.order_index - b.order_index);
   const wtDays = daysUntil(company.webtest_deadline);
 
   return (
@@ -377,50 +431,117 @@ export default function CompanyDetailPage() {
           </div>
         </Card>
 
-        {/* 選考フロー編集 */}
+        {/* 選考フロー編集（トラックごと） */}
         <Card>
-          <h2 className="mb-4 font-bold">選考フロー編集</h2>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h2 className="font-bold">選考フロー編集</h2>
+            {/* まだ無い種別だけ追加できる。同じ種別を二重に持たせない */}
+            <div className="flex flex-wrap gap-1.5">
+              {TRACK_ORDER.filter((k) => !tracks.some((t) => t.kind === k)).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => addTrack(k)}
+                  className="flex min-h-[36px] items-center gap-1 rounded-full border border-separator px-3 text-xs font-medium text-slate-600 transition-transform duration-150 active:scale-95 dark:text-slate-300"
+                >
+                  <Plus size={13} /> {TRACK_LABELS[k]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {tracks.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">
+              選考がありません。上のボタンから追加してください。
+            </p>
+          ) : (
+            <div className="space-y-8">
+              {tracks.map((track) => {
+                const list = stepsOf(track.id);
+                return (
+                  <section key={track.id}>
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                          track.kind === "main"
+                            ? "bg-accent text-white"
+                            : "bg-accent/10 text-accent"
+                        }`}
+                      >
+                        {TRACK_LABELS[track.kind]}
+                      </span>
+                      <div className="w-32">
+                        <Select
+                          ariaLabel={`${TRACK_LABELS[track.kind]}のステータス`}
+                          value={track.status}
+                          onValueChange={(v: string) =>
+                            updateTrack(track.id, { status: v as CompanyStatus })
+                          }
+                          options={Object.entries(STATUS_LABELS).map(([k, v]) => ({
+                            value: k,
+                            label: v,
+                          }))}
+                        />
+                      </div>
+                      <input
+                        type="date"
+                        aria-label={`${TRACK_LABELS[track.kind]}の開始日`}
+                        value={track.start_date ?? ""}
+                        onChange={(e) =>
+                          updateTrack(track.id, { start_date: e.target.value || null })
+                        }
+                        className={`${inputClass} w-40`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeTrack(track.id)}
+                        aria-label={`${TRACK_LABELS[track.kind]}を削除`}
+                        className="ml-auto rounded-lg p-2 text-slate-400 transition-transform duration-150 hover:text-red-500 active:scale-90"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
 
           <div className="mb-4 flex gap-2">
             <input
-              value={newStep}
-              onChange={(e) => setNewStep(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addStep()}
+              value={newStep[track.id] ?? ""}
+              onChange={(e) => setNewStep((prev) => ({ ...prev, [track.id]: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && addStep(track.id)}
               className={inputClass}
               placeholder="ステップ名（例: GD, 一次面接）"
             />
-            <Button type="button" onClick={addStep} disabled={!newStep.trim()} className="shrink-0">
+            <Button type="button" onClick={() => addStep(track.id)} disabled={!(newStep[track.id] ?? "").trim()} className="shrink-0">
               <Plus size={15} /> 追加
             </Button>
           </div>
 
-          {ordered.length === 0 ? (
+          {list.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">
               ステップがありません。上から追加してください。
             </p>
           ) : (
             <div className="space-y-3">
-              {ordered.map((s, i) => {
+              {list.map((s, i) => {
                 const dDays = daysUntil(s.deadline);
                 return (
                   <div
                     key={s.id}
-                    className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"
+                    className="rounded-xl border border-separator p-3"
                   >
                     <div className="flex items-center gap-2">
                       <div className="flex flex-col">
                         <button
                           onClick={() => move(s.id, -1)}
                           disabled={i === 0}
-                          className="text-slate-400 hover:text-brand-sky disabled:opacity-30"
+                          className="text-slate-400 hover:text-accent disabled:opacity-30"
                           aria-label="上へ"
                         >
                           <ChevronUp size={16} />
                         </button>
                         <button
                           onClick={() => move(s.id, 1)}
-                          disabled={i === ordered.length - 1}
-                          className="text-slate-400 hover:text-brand-sky disabled:opacity-30"
+                          disabled={i === list.length - 1}
+                          className="text-slate-400 hover:text-accent disabled:opacity-30"
                           aria-label="下へ"
                         >
                           <ChevronDown size={16} />
@@ -535,6 +656,11 @@ export default function CompanyDetailPage() {
             <p className="mt-4 flex items-center gap-1 text-xs text-amber-600">
               <Link2 size={13} /> Supabase 未設定のため保存されません。
             </p>
+          )}
+                  </section>
+                );
+              })}
+            </div>
           )}
         </Card>
       </div>

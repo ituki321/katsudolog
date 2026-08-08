@@ -12,12 +12,11 @@ import {
   Pencil,
   X,
   CalendarRange,
-  Rocket,
 } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/client";
 import { useAuth } from "@/components/useAuth";
-import type { Company, CompanyStatus, SelectionType, Step } from "@/lib/types";
-import { SELECTION_LABELS, STATUS_LABELS } from "@/lib/types";
+import type { Company, CompanyStatus, Step, Track, TrackKind } from "@/lib/types";
+import { STATUS_LABELS, TRACK_LABELS, TRACK_ORDER } from "@/lib/types";
 import { mainStartLabel } from "@/lib/dates";
 import { haptic } from "@/lib/haptics";
 import { FLOW_TEMPLATES } from "@/lib/flowTemplates";
@@ -52,9 +51,10 @@ const STATUS_FILTERS: { value: "all" | CompanyStatus; label: string }[] = [
   { value: "done", label: STATUS_LABELS.done },
 ];
 
-// 区分ごとの既定テンプレ。本選考は ES→面接、インターンはインターン直結を初期値にする。
-const DEFAULT_TEMPLATE: Record<SelectionType, string> = {
-  intern: "intern",
+// トラック種別ごとの既定テンプレ。インターンは早期選考まで、本選考は新卒テンプレ。
+const DEFAULT_TEMPLATE: Record<TrackKind, string> = {
+  summer: "intern",
+  winter: "intern",
   main: "shinsotsu",
 };
 
@@ -62,12 +62,13 @@ export default function CompaniesPage() {
   const { userId, ready, configured } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 検索・フィルタ
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CompanyStatus>("all");
-  const [typeFilter, setTypeFilter] = useState<"all" | SelectionType>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | TrackKind>("all");
 
   // 追加 / 編集フォーム（editingId が null なら新規作成）
   const [open, setOpen] = useState(false);
@@ -76,15 +77,16 @@ export default function CompaniesPage() {
   const [industry, setIndustry] = useState("");
   const [priority, setPriority] = useState(3);
   const [status, setStatus] = useState<CompanyStatus>("active");
-  const [selectionType, setSelectionType] = useState<SelectionType>("intern");
-  const [mainStartDate, setMainStartDate] = useState("");
-  const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE.intern);
+  // 新規作成時に同時に作るトラック（複数可）。1社で夏・冬・本選考を並行管理するため。
+  const [newTracks, setNewTracks] = useState<TrackKind[]>(["summer"]);
+  const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE.summer);
   const [saving, setSaving] = useState(false);
 
-  // 区分を変えたらフローのテンプレも連動させる（新規作成時のみ。編集中はフロー確定済みなので触らない）
-  function changeSelectionType(next: SelectionType) {
-    setSelectionType(next);
-    if (!editingId) setTemplateId(DEFAULT_TEMPLATE[next]);
+  function toggleNewTrack(kind: TrackKind) {
+    haptic("selection");
+    setNewTracks((prev) =>
+      prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]
+    );
   }
 
   // 企業登録時に同時に登録するインターン日程（複数可）
@@ -108,12 +110,14 @@ export default function CompaniesPage() {
   const load = useCallback(async () => {
     if (!configured) return;
     const supabase = getSupabase();
-    const [c, s] = await Promise.all([
+    const [c, s, t] = await Promise.all([
       supabase.from("companies").select("*").order("created_at", { ascending: false }),
       supabase.from("steps").select("*"),
+      supabase.from("tracks").select("*"),
     ]);
     setCompanies((c.data as Company[]) ?? []);
     setSteps((s.data as Step[]) ?? []);
+    setTracks((t.data as Track[]) ?? []);
     setLoading(false);
   }, [configured]);
 
@@ -123,37 +127,50 @@ export default function CompaniesPage() {
     if (ready) load();
   }, [ready, load]);
 
-  const stepsByCompany = useMemo(() => {
+  // トラックは表示順（夏→冬→本選考）に並べ替えて企業ごとに束ねる
+  const tracksByCompany = useMemo(() => {
+    const map: Record<string, Track[]> = {};
+    for (const t of tracks) (map[t.company_id] ??= []).push(t);
+    for (const list of Object.values(map)) {
+      list.sort((a, b) => TRACK_ORDER.indexOf(a.kind) - TRACK_ORDER.indexOf(b.kind));
+    }
+    return map;
+  }, [tracks]);
+
+  const stepsByTrack = useMemo(() => {
     const map: Record<string, Step[]> = {};
-    for (const s of steps) (map[s.company_id] ??= []).push(s);
+    for (const s of steps) if (s.track_id) (map[s.track_id] ??= []).push(s);
     return map;
   }, [steps]);
 
-  // 区分ごとの件数（セグメンテッドコントロールの数字）
-  const typeCounts = useMemo(
-    () => ({
+  // 種別ごとの企業数（その種別のトラックを持つ企業の数）
+  const typeCounts = useMemo(() => {
+    const has = (kind: TrackKind) =>
+      companies.filter((c) => (tracksByCompany[c.id] ?? []).some((t) => t.kind === kind))
+        .length;
+    return {
       all: companies.length,
-      intern: companies.filter((c) => c.selection_type !== "main").length,
-      main: companies.filter((c) => c.selection_type === "main").length,
-    }),
-    [companies]
-  );
+      summer: has("summer"),
+      winter: has("winter"),
+      main: has("main"),
+    };
+  }, [companies, tracksByCompany]);
 
   // 検索＋区分＋ステータスで絞り込み
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return companies.filter((c) => {
-      // selection_type 未設定の既存データは intern 扱い
-      const type: SelectionType = c.selection_type === "main" ? "main" : "intern";
-      if (typeFilter !== "all" && type !== typeFilter) return false;
-      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      const list = tracksByCompany[c.id] ?? [];
+      if (typeFilter !== "all" && !list.some((t) => t.kind === typeFilter)) return false;
+      // ステータスは、いずれかのトラックが該当すれば残す
+      if (statusFilter !== "all" && !list.some((t) => t.status === statusFilter)) return false;
       if (!q) return true;
       return (
         c.name.toLowerCase().includes(q) ||
         (c.industry ?? "").toLowerCase().includes(q)
       );
     });
-  }, [companies, query, statusFilter, typeFilter]);
+  }, [companies, query, statusFilter, typeFilter, tracksByCompany]);
 
   function resetForm() {
     setEditingId(null);
@@ -161,17 +178,16 @@ export default function CompaniesPage() {
     setIndustry("");
     setPriority(3);
     setStatus("active");
-    setSelectionType("intern");
-    setMainStartDate("");
-    setTemplateId(DEFAULT_TEMPLATE.intern);
+    setNewTracks(["summer"]);
+    setTemplateId(DEFAULT_TEMPLATE.summer);
     setInternDates([]);
   }
 
   function openCreate() {
     resetForm();
-    // 「本選考」タブを見ているときはその区分で追加したいはず、という前提で初期値を合わせる
+    // 特定の種別を見ているときは、その種別で追加したいはずなので初期値を合わせる
     if (typeFilter !== "all") {
-      setSelectionType(typeFilter);
+      setNewTracks([typeFilter]);
       setTemplateId(DEFAULT_TEMPLATE[typeFilter]);
     }
     setOpen(true);
@@ -183,8 +199,6 @@ export default function CompaniesPage() {
     setIndustry(c.industry ?? "");
     setPriority(c.priority);
     setStatus(c.status);
-    setSelectionType(c.selection_type === "main" ? "main" : "intern");
-    setMainStartDate(c.main_start_date ?? "");
     setOpen(true);
   }
 
@@ -199,9 +213,6 @@ export default function CompaniesPage() {
     setSaving(true);
     const supabase = getSupabase();
 
-    // 本選考の開始日は本選考のときだけ持たせる（区分をインターンに戻したら日付も消す）
-    const startDate = selectionType === "main" ? mainStartDate || null : null;
-
     if (editingId) {
       // ---- 更新 ----
       await supabase
@@ -211,8 +222,6 @@ export default function CompaniesPage() {
           industry: industry.trim() || null,
           priority,
           status,
-          selection_type: selectionType,
-          main_start_date: startDate,
         })
         .eq("id", editingId);
     } else {
@@ -224,26 +233,38 @@ export default function CompaniesPage() {
           name: name.trim(),
           industry: industry.trim() || null,
           priority,
-          selection_type: selectionType,
-          main_start_date: startDate,
         })
         .select()
         .single();
       if (!error && data) {
+        // 選んだ種別ぶんトラックを作る。1社で夏・冬・本選考を並行して持てる
+        const kinds = newTracks.length > 0 ? newTracks : (["summer"] as TrackKind[]);
+        const { data: created } = await supabase
+          .from("tracks")
+          .insert(
+            kinds.map((kind) => ({ company_id: data.id, user_id: userId, kind }))
+          )
+          .select();
+
         const tpl = FLOW_TEMPLATES.find((t) => t.id === templateId);
-        if (tpl && tpl.steps.length > 0) {
-          const rows = tpl.steps.map((sname, i) => ({
-            company_id: data.id,
-            user_id: userId,
-            name: sname,
-            order_index: i,
-            status: i === 0 ? "current" : "pending",
-          }));
+        if (tpl && tpl.steps.length > 0 && created) {
+          // 同じフローを各トラックに複製する。以後はトラックごとに独立して編集できる
+          const rows = (created as Track[]).flatMap((tr) =>
+            tpl.steps.map((sname, i) => ({
+              company_id: data.id,
+              track_id: tr.id,
+              user_id: userId,
+              name: sname,
+              order_index: i,
+              status: i === 0 ? "current" : "pending",
+            }))
+          );
           await supabase.from("steps").insert(rows);
         }
         // インターン日程（開始日が入っている行だけ）を企業に紐づけて登録。
         // 区分を本選考に切り替えた場合は、入力途中の日程が残っていても登録しない。
-        const internRows = (selectionType === "main" ? [] : internDates)
+        const hasInternTrack = kinds.some((k) => k === "summer" || k === "winter");
+        const internRows = (hasInternTrack ? internDates : [])
           .filter((r) => r.start)
           .map((r) => ({
             user_id: userId,
@@ -299,8 +320,9 @@ export default function CompaniesPage() {
           className="w-full sm:w-auto sm:inline-grid"
           segments={[
             { value: "all", label: "すべて", count: typeCounts.all },
-            { value: "intern", label: SELECTION_LABELS.intern, count: typeCounts.intern },
-            { value: "main", label: SELECTION_LABELS.main, count: typeCounts.main },
+            { value: "summer", label: "夏", count: typeCounts.summer },
+            { value: "winter", label: "冬", count: typeCounts.winter },
+            { value: "main", label: "本選考", count: typeCounts.main },
           ]}
         />
       </div>
@@ -402,46 +424,56 @@ export default function CompaniesPage() {
                       </div>
                     </div>
 
-                    <div className="mt-3 flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        {/* 区分。本選考だけ塗りを効かせて、一覧の中で視線が先に止まるようにする */}
-                        {c.selection_type === "main" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-white">
-                            <Rocket size={12} /> {SELECTION_LABELS.main}
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">
-                            {SELECTION_LABELS.intern}
-                          </span>
-                        )}
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadge[c.status]}`}
-                        >
-                          {STATUS_LABELS[c.status]}
-                        </span>
-                        {c.selection_type === "main" && mainStartLabel(c.main_start_date) && (
-                          <span className="rounded-full bg-brand-sky/10 px-2.5 py-0.5 text-xs font-medium tabular-nums text-brand-navy dark:bg-brand-sky/15 dark:text-brand-sky">
-                            {mainStartLabel(c.main_start_date)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex shrink-0">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star
-                            key={i}
-                            size={14}
-                            className={
-                              i < c.priority
-                                ? "fill-amber-400 text-amber-400"
-                                : "text-slate-300 dark:text-slate-600"
-                            }
-                          />
-                        ))}
-                      </div>
+                    {/* 志望度は企業に属する情報なので、トラックより上に置く */}
+                    <div className="mt-3 flex justify-end">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          size={14}
+                          className={
+                            i < c.priority
+                              ? "fill-amber-400 text-amber-400"
+                              : "text-slate-300 dark:text-slate-600"
+                          }
+                        />
+                      ))}
                     </div>
 
-                    <div className="mt-4">
-                      <FlowProgress steps={stepsByCompany[c.id] ?? []} />
+                    {/* 選考トラック。夏・冬・本選考をこの1枚で並べて見る */}
+                    <div className="mt-3 space-y-3">
+                      {(tracksByCompany[c.id] ?? []).length === 0 ? (
+                        <p className="text-xs text-slate-400">選考が未登録です</p>
+                      ) : (
+                        (tracksByCompany[c.id] ?? []).map((t) => (
+                          <div
+                            key={t.id}
+                            className="rounded-xl border border-separator p-2.5"
+                          >
+                            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                  t.kind === "main"
+                                    ? "bg-accent text-white"
+                                    : "bg-accent/10 text-accent"
+                                }`}
+                              >
+                                {TRACK_LABELS[t.kind]}
+                              </span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusBadge[t.status]}`}
+                              >
+                                {STATUS_LABELS[t.status]}
+                              </span>
+                              {mainStartLabel(t.start_date) && (
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                  {mainStartLabel(t.start_date)}
+                                </span>
+                              )}
+                            </div>
+                            <FlowProgress steps={stepsByTrack[t.id] ?? []} compact />
+                          </div>
+                        ))
+                      )}
                     </div>
 
                     <Link
@@ -460,32 +492,35 @@ export default function CompaniesPage() {
 
       <Modal open={open} onClose={closeModal} title={editingId ? "企業を編集" : "企業を追加"}>
         <form onSubmit={submitForm} className="space-y-4">
-          {/* 区分は入力フォームの形（開始日を出すか、インターン日程を出すか）を決めるので最初に選ばせる */}
-          <Field label="選考区分">
-            <SegmentedControl
-              label="選考区分"
-              value={selectionType}
-              onChange={changeSelectionType}
-              className="w-full"
-              segments={[
-                { value: "intern", label: SELECTION_LABELS.intern },
-                { value: "main", label: SELECTION_LABELS.main },
-              ]}
-            />
-          </Field>
-
-          {selectionType === "main" && (
-            <Field label="本選考の開始日（任意）">
-              <input
-                type="date"
-                value={mainStartDate}
-                onChange={(e) => setMainStartDate(e.target.value)}
-                className={inputClass}
-              />
-              <span className="mt-1 block text-[11px] text-slate-400">
-                エントリー受付が始まった日。一覧に「あと◯日 / 今日から / 開始済み」として出ます。
+          {!editingId && (
+            <div>
+              <span className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                登録する選考（複数可）
               </span>
-            </Field>
+              <div className="grid grid-cols-3 gap-2">
+                {TRACK_ORDER.map((kind) => {
+                  const on = newTracks.includes(kind);
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleNewTrack(kind)}
+                      className={`min-h-[44px] rounded-xl border px-2 py-2 text-xs font-medium transition-transform duration-150 active:scale-[0.97] ${
+                        on
+                          ? "border-accent bg-accent/10 text-accent"
+                          : "border-separator text-slate-500 dark:text-slate-400"
+                      }`}
+                    >
+                      {TRACK_LABELS[kind]}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="mt-1.5 block text-[11px] text-slate-400">
+                あとから企業の詳細ページで追加・削除できます。開始日もそこで設定します。
+              </span>
+            </div>
           )}
 
           <Field label="企業名 *">
@@ -556,7 +591,7 @@ export default function CompaniesPage() {
               />
             </Field>
           )}
-          {!editingId && selectionType === "intern" && (
+          {!editingId && newTracks.some((k) => k === "summer" || k === "winter") && (
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
