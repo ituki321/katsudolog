@@ -36,10 +36,18 @@ export default function FlowProgress({
     );
   }
   return (
-    <div className="flex items-center">
+    // ステップ名を出す版は、数が増えるとラベルぶんの最低幅で画面からはみ出す。
+    // ラベルを捨てると手がかりが無くなるので、はみ出しはこの枠の中の横スクロールに閉じ込める
+    // （ページ本体は絶対に横に広がらない）。ドットだけの compact 版は幅を食わないので対象外。
+    <div
+      className={
+        compact ? "flex min-w-0 items-center" : "-mx-1 flex min-w-0 overflow-x-auto px-1 pb-1"
+      }
+    >
+      <div className={compact ? "flex min-w-0 flex-1 items-center" : "flex min-w-max flex-1 items-center"}>
       {ordered.map((s, i) => (
-        <div key={s.id} className="flex flex-1 items-center last:flex-none">
-          <div className="flex flex-col items-center">
+        <div key={s.id} className="flex min-w-0 flex-1 items-center last:flex-none">
+          <div className="flex shrink-0 flex-col items-center">
             <div
               className={`flex items-center justify-center rounded-full ${
                 compact ? "h-5 w-5 text-[10px]" : "h-7 w-7 text-xs"
@@ -63,10 +71,13 @@ export default function FlowProgress({
             )}
           </div>
           {i < ordered.length - 1 && (
-            <div className={`mx-1 h-1 flex-1 rounded-full ${lineStyle[s.status]}`} />
+            <div
+              className={`mx-1 h-1 flex-1 rounded-full ${compact ? "" : "min-w-6"} ${lineStyle[s.status]}`}
+            />
           )}
         </div>
       ))}
+      </div>
     </div>
   );
 }

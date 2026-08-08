@@ -313,10 +313,27 @@ export default function CompanyDetailPage() {
         }
       />
 
-      {/* 進捗バー */}
+      {/* 進捗バー。トラックごとに分けて出す（まとめて1本にすると別の選考が繋がって見える） */}
       <Card className="mb-6">
         <p className="mb-3 text-sm font-semibold">選考フロー進捗</p>
-        <FlowProgress steps={steps} />
+        {tracks.length === 0 ? (
+          <p className="text-xs text-slate-400">選考が未登録です</p>
+        ) : (
+          <div className="space-y-4">
+            {tracks.map((t) => (
+              <div key={t.id}>
+                <span
+                  className={`mb-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    t.kind === "main" ? "bg-accent text-white" : "bg-accent/10 text-accent"
+                  }`}
+                >
+                  {TRACK_LABELS[t.kind]}
+                </span>
+                <FlowProgress steps={stepsOf(t.id)} />
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
